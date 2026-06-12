@@ -1,0 +1,14 @@
+# PlatformIO
+.pio/
+.vscode/
+.claude/
+
+# File generato automaticamente
+include/user_config.h
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

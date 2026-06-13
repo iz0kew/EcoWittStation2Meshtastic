@@ -1,4 +1,4 @@
-# EcoWittStation2Meshtastic — v1.1.0
+# EcoWittStation2Meshtastic — v1.1.1
 
 <p align="center">
   <strong>🇮🇹 <a href="#italiano">Italiano</a></strong> &nbsp;|&nbsp;
@@ -418,6 +418,16 @@ default PSK (`Channels.h`), channel hash algorithm (`Channels.cpp`), radio heade
 ### License
 
 Released under the **MIT License** — see [LICENSE](LICENSE).
+
+---
+
+### Changelog
+
+#### v1.1.1
+- Added `ok_to_mqtt` setting: when enabled, sets bit 0 of the `bitfield` field (tag 9) in the `Data` protobuf payload, allowing MQTT gateway nodes to forward packets to the broker.
+
+#### v1.1.0
+- Initial public release.
 
 ---
 

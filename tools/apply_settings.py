@@ -101,6 +101,8 @@ def main():
     if not 0 <= hop_limit <= 7:
         die("hop_limit deve essere tra 0 e 7")
 
+    ok_to_mqtt = get(cfg, "meshtastic", "ok_to_mqtt", "true").lower() in ("1", "true", "yes", "si")
+
     # channel_name: opzionale, default = nome canonico del preset
     channel_name_override = get(cfg, "meshtastic", "channel_name", "").strip()
     if channel_name_override:
@@ -167,7 +169,7 @@ def main():
 
     psk_hex = ", ".join(f"0x{b:02x}" for b in psk_bytes)
 
-    FW_VERSION = "1.1.0"   # aggiorna qui ad ogni release
+    FW_VERSION = "1.1.1"   # aggiorna qui ad ogni release
 
     hdr = f"""// ============================================================================
 // user_config.h — GENERATO AUTOMATICAMENTE da tools/apply_settings.py
@@ -192,6 +194,7 @@ def main():
 #define MESH_LONG_NAME         "{esc(long_name)}"
 #define MESH_TX_POWER_DBM      {txpwr}
 #define MESH_HOP_LIMIT         {hop_limit}
+#define MESH_OK_TO_MQTT        {1 if ok_to_mqtt else 0}
 #define MESH_LIGHTNING_TEXT    {1 if lightning else 0}
 #define MESH_LIGHTNING_WINDOW_MIN {lightning_window}
 #define MESH_LIGHTNING_THRESHOLD  {lightning_threshold}f

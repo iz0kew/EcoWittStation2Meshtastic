@@ -160,6 +160,10 @@ static bool sendData(uint8_t portnum, const uint8_t *payload, size_t len) {
   size_t p = 0;
   p = pbVarintField(data, p, 1, portnum);
   p = pbBytesField(data, p, 2, payload, len);
+#if MESH_OK_TO_MQTT
+  // bitfield campo 9: bit 0 = ok_to_mqtt (mesh.pb.h)
+  p = pbVarintField(data, p, 9, 1);
+#endif
   return meshTransmit(data, p);
 }
 

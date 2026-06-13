@@ -121,11 +121,11 @@ preset = MediumFast               # preset modem LoRa
                                   # MediumFast | MediumSlow |
                                   # LongFast | LongModerate | LongSlow
 send_interval_min = 10            # intervallo tra invii telemetria + NodeInfo (minuti)
-text_interval_min = 30            # bollettino meteo testo (0 = disabilitato)
-short_name = WX32                 # nome breve (max 4 caratteri)
+text_interval_min = 0            # bollettino meteo testo (0 = disabilitato)
+short_name =                  # nome breve (max 4 caratteri)
                                   # lascia vuoto per usare gli ultimi 4 hex del node ID
 long_name = Stazione Meteo        # nome esteso sulla rete
-tx_power_dbm = 14                 # potenza TX in dBm (-9..22 per SX1262)
+tx_power_dbm = 22                 # potenza TX in dBm (-9..22 per SX1262)
 hop_limit = 3                     # hop massimi in mesh (0-7)
 ok_to_mqtt = true                 # consenti ai gateway MQTT di inoltrare i pacchetti
 
@@ -136,8 +136,8 @@ channel_key = AQ==                # PSK in base64 (AQ== = chiave pubblica defaul
 # Canale secondario per bollettini testo e avvisi fulmini (opzionale)
 # Lascia entrambe le righe vuote per usare lo stesso canale principale.
 # La chiave puo' essere AES-128 (16 byte) o AES-256 (32 byte).
-text_channel_name =
-text_channel_key =
+text_channel_name =  METEOLAZIO
+text_channel_key = WP6qHPCEFRZE8iK8SHQpZ1K9145G6jdu3YnP+dMSOg0=
 
 latitude = 41.8603                # coordinate fisse (0/0 = non trasmettere)
 longitude = 13.0337
@@ -183,8 +183,7 @@ Lo script valida tutti i valori e blocca la compilazione con un messaggio chiaro
    🌧️ 1h 0.0mm  24h 2.3mm
    🌅 05:42  🌇 20:44
    🌖 Gibbosa calante  72%
-   📡 Vuoi la tua stazione meteo sulla mesh?
-   tinyurl.com/26uu449o
+   
    ```
 4. **Se `lightning_text = true`**: allarme fulmini basato su punteggio soglia, inviato sul canale secondario:
    - Ad ogni pacchetto WH57 (~79 s) si calcola `score = fulmini_negli_ultimi_N_min / distanza_km`
@@ -365,11 +364,11 @@ preset = MediumFast               # LoRa modem preset
                                   # MediumFast | MediumSlow |
                                   # LongFast | LongModerate | LongSlow
 send_interval_min = 10            # telemetry + NodeInfo send interval (minutes)
-text_interval_min = 30            # weather text bulletin on channel (0 = disabled)
-short_name = WX32                 # node short name (max 4 chars)
+text_interval_min = 0             # weather text bulletin on channel (0 = disabled)
+short_name =                      # node short name (max 4 chars)
                                   # leave empty to auto-use last 4 hex digits of node ID
 long_name = Weather Station       # node long name on the mesh
-tx_power_dbm = 14                 # TX power in dBm (-9..22 for SX1262)
+tx_power_dbm = 22                 # TX power in dBm (-9..22 for SX1262)
 hop_limit = 3                     # max hops in mesh (0-7)
 ok_to_mqtt = true                 # allow MQTT gateway nodes to forward packets
 
@@ -380,8 +379,8 @@ channel_key = AQ==                # PSK in base64 (AQ== = default public key)
 # Secondary channel for text bulletins and lightning alerts (optional)
 # Leave both lines empty to use the primary channel for everything.
 # Key can be AES-128 (16 bytes) or AES-256 (32 bytes).
-text_channel_name =
-text_channel_key =
+text_channel_name = METEOLAZIO
+text_channel_key = WP6qHPCEFRZE8iK8SHQpZ1K9145G6jdu3YnP+dMSOg0=
 
 latitude = 41.8603                # fixed coordinates (0/0 = do not broadcast)
 longitude = 13.0337
@@ -427,8 +426,7 @@ The script validates all values and halts the build with a clear error message i
    🌧️ 1h 0.0mm  24h 2.3mm
    🌅 05:42  🌇 20:44
    🌖 Gibbosa calante  72%
-   📡 Vuoi la tua stazione meteo sulla mesh?
-   tinyurl.com/26uu449o
+   
    ```
 4. **If `lightning_text = true`**: score-based lightning alert, sent on the secondary channel:
    - Every WH57 packet (~79 s): `score = strikes_in_last_N_min / distance_km`

@@ -14,8 +14,13 @@ void radioStartFSK();
 // ---------------------------------------------------------------------------
 // Costanti protocollo Meshtastic
 // ---------------------------------------------------------------------------
-// PSK del canale (AES128) — configurata in settings.ini -> user_config.h
-static const uint8_t DEFAULT_PSK[16] = MESH_CHANNEL_KEY;
+// PSK dei canali — configurati in settings.ini -> user_config.h
+// Canale 0: principale (telemetria, NodeInfo, posizione)
+// Canale 1: testo/fulmini (uguale al principale se MESH_TEXT_CHANNEL_ENABLED==0)
+// MESH_CHANNEL_KEY_SIZE e MESH_TEXT_CHANNEL_KEY_SIZE sono 16 (AES-128) o 32 (AES-256)
+static const uint8_t s_psk0[MESH_CHANNEL_KEY_SIZE]      = MESH_CHANNEL_KEY;
+static const uint8_t s_psk1[MESH_TEXT_CHANNEL_KEY_SIZE] = MESH_TEXT_CHANNEL_KEY;
+
 static const uint32_t BROADCAST_ADDR = 0xFFFFFFFF;
 static const uint8_t  LORA_SYNCWORD  = 0x2B;
 static const uint16_t LORA_PREAMBLE  = 16;
@@ -25,9 +30,13 @@ static const uint8_t PORT_POSITION  = 3;
 static const uint8_t PORT_NODEINFO  = 4;
 static const uint8_t PORT_TELEMETRY = 67;
 
-static uint32_t s_nodeId   = 0;
-static uint32_t s_pktSent  = 0;
-static uint8_t  s_chanHash = 0;
+static uint32_t s_nodeId    = 0;
+static uint32_t s_pktSent   = 0;
+static uint8_t  s_chanHash0 = 0;                          // canale principale
+static uint8_t  s_chanHash1 = 0;                          // canale testo/fulmini
+static const size_t s_pskLen0 = MESH_CHANNEL_KEY_SIZE;
+static const size_t s_pskLen1 = MESH_TEXT_CHANNEL_KEY_SIZE;
+static char     s_shortName[5] = MESH_SHORT_NAME;
 
 // ---------------------------------------------------------------------------
 // Mini-encoder protobuf (solo cio' che serve)
@@ -72,6 +81,25 @@ static uint8_t xorHash(const uint8_t *p, size_t len) {
 }
 
 // ---------------------------------------------------------------------------
+// Cifra con AES-128 o AES-256 in modalità CTR a seconda della lunghezza della chiave.
+// key deve essere 16 o 32 byte; iv deve essere 16 byte.
+// ---------------------------------------------------------------------------
+static void aesEncrypt(uint8_t *out, const uint8_t *in, size_t len,
+                       const uint8_t *key, size_t keyLen, const uint8_t *iv) {
+  if (keyLen == 32) {
+    CTR<AES256> ctr;
+    ctr.setKey(key, 32);
+    ctr.setIV(iv, 16);
+    ctr.encrypt(out, in, len);
+  } else {
+    CTR<AES128> ctr;
+    ctr.setKey(key, 16);
+    ctr.setIV(iv, 16);
+    ctr.encrypt(out, in, len);
+  }
+}
+
+// ---------------------------------------------------------------------------
 void meshInit() {
   uint8_t mac[6];
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -80,12 +108,26 @@ void meshInit() {
              ((uint32_t)mac[4] << 8)  |  (uint32_t)mac[5];
   if (s_nodeId == 0 || s_nodeId == BROADCAST_ADDR) s_nodeId = 0x12345678;
 
-  s_chanHash = xorHash((const uint8_t *)MESH_CHANNEL_NAME, strlen(MESH_CHANNEL_NAME))
-             ^ xorHash(DEFAULT_PSK, sizeof(DEFAULT_PSK));
+#if MESH_SHORT_NAME_AUTO
+  snprintf(s_shortName, sizeof(s_shortName), "%04lX", (unsigned long)(s_nodeId & 0xFFFF));
+#endif
 
-  Serial.printf("[mesh] nodo !%08lx canale '%s' hash 0x%02x freq %.3f SF%d BW%g CR4/%d\n",
-                (unsigned long)s_nodeId, MESH_CHANNEL_NAME, s_chanHash,
+  s_chanHash0 = xorHash((const uint8_t *)MESH_CHANNEL_NAME, strlen(MESH_CHANNEL_NAME))
+              ^ xorHash(s_psk0, sizeof(s_psk0));
+  s_chanHash1 = xorHash((const uint8_t *)MESH_TEXT_CHANNEL_NAME, strlen(MESH_TEXT_CHANNEL_NAME))
+              ^ xorHash(s_psk1, sizeof(s_psk1));
+
+  Serial.printf("[mesh] nodo !%08lx  freq %.3f SF%d BW%g CR4/%d\n",
+                (unsigned long)s_nodeId,
                 (double)MESH_FREQ_MHZ, MESH_SF, (double)MESH_BW_KHZ, MESH_CR);
+  Serial.printf("[mesh] canale principale '%s' hash 0x%02x\n",
+                MESH_CHANNEL_NAME, s_chanHash0);
+#if MESH_TEXT_CHANNEL_ENABLED
+  Serial.printf("[mesh] canale testo      '%s' hash 0x%02x\n",
+                MESH_TEXT_CHANNEL_NAME, s_chanHash1);
+#else
+  Serial.printf("[mesh] canale testo: stesso del principale\n");
+#endif
 }
 
 uint32_t meshNodeId()      { return s_nodeId; }
@@ -96,23 +138,26 @@ uint32_t meshPacketsSent() { return s_pktSent; }
 // poi ripristina la ricezione FSK. Da CryptoEngine.cpp:
 //   nonce[0..7] = packetId (LE, esteso a 64 bit), nonce[8..11] = fromNode (LE)
 // ---------------------------------------------------------------------------
-static bool meshTransmit(const uint8_t *plain, size_t plainLen) {
+// chanIdx: 0 = canale principale, 1 = canale testo/fulmini
+static bool meshTransmit(const uint8_t *plain, size_t plainLen, uint8_t chanIdx = 0) {
   if (plainLen > 200) return false;
+
+  // seleziona PSK, lunghezza e channel hash in base al canale richiesto
+  const uint8_t *psk      = (chanIdx == 1) ? s_psk1      : s_psk0;
+  size_t         pskLen   = (chanIdx == 1) ? s_pskLen1   : s_pskLen0;
+  uint8_t        chanHash = (chanIdx == 1) ? s_chanHash1 : s_chanHash0;
 
   uint32_t pktId = esp_random();
   if (pktId == 0) pktId = 1;
 
-  // --- cifratura ---
+  // --- cifratura AES-128 o AES-256 CTR ---
   uint8_t nonce[16] = {0};
   uint64_t id64 = pktId;
   memcpy(nonce, &id64, 8);
   memcpy(nonce + 8, &s_nodeId, 4);
 
   uint8_t cipher[208];
-  CTR<AES128> ctr;
-  ctr.setKey(DEFAULT_PSK, 16);
-  ctr.setIV(nonce, 16);
-  ctr.encrypt(cipher, plain, plainLen);
+  aesEncrypt(cipher, plain, plainLen, psk, pskLen, nonce);
 
   // --- header 16 byte (RadioInterface.h) ---
   uint8_t pkt[224];
@@ -122,7 +167,7 @@ static bool meshTransmit(const uint8_t *plain, size_t plainLen) {
   memcpy(pkt + 8,  &pktId,    4);
   const uint8_t hopLimit = MESH_HOP_LIMIT, hopStart = MESH_HOP_LIMIT;
   pkt[12] = (hopLimit & 0x07) | (uint8_t)(hopStart << 5);   // flags
-  pkt[13] = s_chanHash;                                     // channel hash
+  pkt[13] = chanHash;                                        // channel hash
   pkt[14] = 0;                                              // next_hop
   pkt[15] = (uint8_t)(s_nodeId & 0xFF);                     // relay_node
   memcpy(pkt + 16, cipher, plainLen);
@@ -155,7 +200,7 @@ static bool meshTransmit(const uint8_t *plain, size_t plainLen) {
 // ---------------------------------------------------------------------------
 // Data { portnum=1 varint; payload=2 bytes } -> cifrato e trasmesso
 // ---------------------------------------------------------------------------
-static bool sendData(uint8_t portnum, const uint8_t *payload, size_t len) {
+static bool sendData(uint8_t portnum, const uint8_t *payload, size_t len, uint8_t chanIdx = 0) {
   uint8_t data[200];
   size_t p = 0;
   p = pbVarintField(data, p, 1, portnum);
@@ -164,7 +209,7 @@ static bool sendData(uint8_t portnum, const uint8_t *payload, size_t len) {
   // bitfield campo 9: bit 0 = ok_to_mqtt (mesh.pb.h)
   p = pbVarintField(data, p, 9, 1);
 #endif
-  return meshTransmit(data, p);
+  return meshTransmit(data, p, chanIdx);
 }
 
 // ---------------------------------------------------------------------------
@@ -187,58 +232,3 @@ bool meshSendTelemetry(bool haveTH, float tempC, float rh,
 
   // Telemetry { fixed32 time=1; environment_metrics=3 }
   uint8_t tel[80];
-  size_t t = 0;
-  t = pbFixed32Field(tel, t, 1, 0);            // time sconosciuto
-  t = pbBytesField(tel, t, 3, env, e);
-
-  return sendData(PORT_TELEMETRY, tel, t);
-}
-
-// ---------------------------------------------------------------------------
-bool meshSendNodeInfo() {
-  // User { id=1 str; long_name=2 str; short_name=3 str; hw_model=5 enum }
-  char idStr[12];
-  snprintf(idStr, sizeof(idStr), "!%08lx", (unsigned long)s_nodeId);
-
-  uint8_t user[96];
-  size_t u = 0;
-  u = pbBytesField(user, u, 1, (const uint8_t *)idStr, strlen(idStr));
-  u = pbBytesField(user, u, 2, (const uint8_t *)MESH_LONG_NAME,
-                   strlen(MESH_LONG_NAME));
-  u = pbBytesField(user, u, 3, (const uint8_t *)MESH_SHORT_NAME,
-                   strlen(MESH_SHORT_NAME));
-  u = pbVarintField(user, u, 5, 255);          // hw_model = PRIVATE_HW
-
-  return sendData(PORT_NODEINFO, user, u);
-}
-
-// ---------------------------------------------------------------------------
-bool meshSendText(const char *txt) {
-  return sendData(PORT_TEXT, (const uint8_t *)txt, strlen(txt));
-}
-
-// ---------------------------------------------------------------------------
-// Posizione fissa della stazione (mesh.proto, message Position):
-//   latitude_i=1 sfixed32 (gradi*1e7), longitude_i=2 sfixed32,
-//   altitude=3 int32 (m s.l.m.), time=4 fixed32,
-//   location_source=5 (1=LOC_MANUAL), altitude_source=6 (1=ALT_MANUAL),
-//   precision_bits=23 (32 = precisione piena)
-// ---------------------------------------------------------------------------
-bool meshSendPosition() {
-#if MESH_POS_ENABLED
-  uint8_t pos[64];
-  size_t p = 0;
-  p = pbFixed32Field(pos, p, 1, (uint32_t)(int32_t)MESH_LAT_I);
-  p = pbFixed32Field(pos, p, 2, (uint32_t)(int32_t)MESH_LON_I);
-  // int32 negativo -> varint del valore esteso in segno a 64 bit
-  p = pbTag(pos, p, 3, 0);
-  p = pbVarint(pos, p, (uint64_t)(int64_t)(int32_t)MESH_ALT_M);
-  p = pbFixed32Field(pos, p, 4, 0);          // time sconosciuto
-  p = pbVarintField(pos, p, 5, 1);           // LOC_MANUAL
-  p = pbVarintField(pos, p, 6, 1);           // ALT_MANUAL
-  p = pbVarintField(pos, p, 23, 32);         // precisione piena
-  return sendData(PORT_POSITION, pos, p);
-#else
-  return false;
-#endif
-}

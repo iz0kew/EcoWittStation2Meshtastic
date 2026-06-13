@@ -1,4 +1,4 @@
-# EcoWittStation2Meshtastic — v1.1.1
+# EcoWittStation2Meshtastic — v1.2.0
 
 <p align="center">
   <strong>🇮🇹 <a href="#italiano">Italiano</a></strong> &nbsp;|&nbsp;
@@ -37,11 +37,12 @@ Firmware custom per schede **Heltec ESP32 LoRa** che riceve i dati di una stazio
 - **Bridge Meshtastic** (opzionale, configurabile):
   - Telemetria ambientale `EnvironmentMetrics` (temperatura media, umidità media, pioggia 1h/24h) → visibile nei grafici "Ambiente" dell'app
   - Posizione fissa (lat/lon/quota) → il nodo appare sulla mappa
-  - NodeInfo con short/long name personalizzabili (lo short name appare anche sulla schermata 8)
-  - Canale configurabile: nome e chiave PSK (base64) impostabili in `settings.ini`
+  - NodeInfo con short/long name personalizzabili — lo `short_name` può essere lasciato vuoto per usare automaticamente gli **ultimi 4 hex del node ID** (come fa Meshtastic)
+  - **Doppio canale**: canale principale per telemetria/NodeInfo/posizione e canale secondario opzionale per bollettini testo e avvisi fulmini (ciascuno con nome e PSK indipendenti)
+  - Chiavi canale in formato base64: supporto **AES-128** (16 byte) e **AES-256** (32 byte)
   - Hop limit configurabile (0–7)
-  - Avviso fulmini come messaggio di testo sul canale (opzionale)
-  - Bollettino meteo testuale periodico sul canale (opzionale, intervallo separato)
+  - Avviso fulmini come messaggio di testo (opzionale)
+  - Bollettino meteo testuale periodico (opzionale, intervallo separato)
 
 > La radio è una sola: la ricezione FSK si sospende per ~1–2 secondi durante ogni trasmissione LoRa, poi riprende. Con sensori che trasmettono ogni 64–79 s la perdita di campioni è trascurabile.
 
@@ -67,14 +68,14 @@ Le librerie vengono scaricate automaticamente al primo build:
 |---|---|
 | `jgromes/RadioLib ^7.1.2` | Driver SX1262 (FSK + LoRa) |
 | `olikraus/U8g2 ^2.36.5` | Driver OLED SSD1306 |
-| `rweather/Crypto ^0.4.0` | AES128-CTR per cifratura Meshtastic |
+| `rweather/Crypto ^0.4.0` | AES-128/256-CTR per cifratura Meshtastic |
 | `adafruit/Adafruit ST7735 and ST7789 Library ^1.10.4` | Driver TFT |
 | `adafruit/Adafruit GFX Library ^1.11.11` | Grafica TFT |
 
 ### Installazione
 
 ```bash
-git clone https://github.com/tuoutente/EcoWittStation2Meshtastic.git
+git clone https://github.com/iz0kew/EcoWittStation2Meshtastic.git
 cd EcoWittStation2Meshtastic
 
 # 1. Personalizza settings.ini (vedi sezione Configurazione)
@@ -108,13 +109,24 @@ preset = MediumFast               # preset modem LoRa
                                   # MediumFast | MediumSlow |
                                   # LongFast | LongModerate | LongSlow
 send_interval_min = 10            # intervallo tra invii telemetria + NodeInfo (minuti)
-text_interval_min = 30            # bollettino meteo testo sul canale (0 = disabilitato)
-short_name = WX32                 # nome breve sulla rete (max 4 caratteri)
+text_interval_min = 30            # bollettino meteo testo (0 = disabilitato)
+short_name = WX32                 # nome breve (max 4 caratteri)
+                                  # lascia vuoto per usare gli ultimi 4 hex del node ID
 long_name = Stazione Meteo        # nome esteso sulla rete
 tx_power_dbm = 14                 # potenza TX in dBm (-9..22 per SX1262)
-hop_limit = 3                     # hop massimi in mesh (0–7)
-channel_name =                    # nome canale (vuoto = nome preset, es. "MediumFast")
-channel_key = AQ==                # PSK canale in base64 (AQ== = chiave pubblica default)
+hop_limit = 3                     # hop massimi in mesh (0-7)
+ok_to_mqtt = true                 # consenti ai gateway MQTT di inoltrare i pacchetti
+
+# Canale principale (telemetria, NodeInfo, posizione)
+channel_name =                    # vuoto = nome del preset (es. "MediumFast")
+channel_key = AQ==                # PSK in base64 (AQ== = chiave pubblica default)
+
+# Canale secondario per bollettini testo e avvisi fulmini (opzionale)
+# Lascia entrambe le righe vuote per usare lo stesso canale principale.
+# La chiave puo' essere AES-128 (16 byte) o AES-256 (32 byte).
+text_channel_name =
+text_channel_key =
+
 latitude = 41.8603                # coordinate fisse (0/0 = non trasmettere)
 longitude = 13.0337
 altitude_m = 571                  # quota in metri s.l.m.
@@ -124,7 +136,7 @@ lightning_threshold = 0.5         # soglia allarme: fulmini_nella_finestra / dis
 
 [ricezione]
 freq_mhz = 868.35                 # frequenza RX sensori
-bitrate_kbps = 17.24              # bitrate FSK (WH32: 58 µs → 17.24 kbps)
+bitrate_kbps = 17.24              # bitrate FSK (WH32: 58 µs -> 17.24 kbps)
 freq_dev_khz = 60.0               # deviazione FSK del trasmettitore
 rx_bw_khz = 234.3                 # banda di ricezione
 
@@ -132,28 +144,35 @@ rx_bw_khz = 234.3                 # banda di ricezione
 sample_interval_min = 10          # campionatura per grafici (5 o 10 minuti)
 ```
 
-**Canale personalizzato:** imposta `channel_name` e genera una chiave a 16 byte con:
+#### Generare una chiave canale
+
+**AES-128** (16 byte, compatibile con tutti i client Meshtastic):
 ```bash
 python -c "import os,base64; print(base64.b64encode(os.urandom(16)).decode())"
+```
+
+**AES-256** (32 byte, maggiore sicurezza):
+```bash
+python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
 ```
 
 Lo script valida tutti i valori e blocca la compilazione con un messaggio chiaro in caso di errore.
 
 ### Come appare sulla rete Meshtastic
 
-1. **Avvio**: nodo visibile come `!xxxxxxxx` (ID derivato dal MAC WiFi)
-2. **Ogni `send_interval_min`** (es. ogni 10 min):
+1. **Avvio**: nodo visibile come `!xxxxxxxx` (ID derivato dal MAC WiFi). Se `short_name` è vuoto, gli ultimi 4 hex dell'ID vengono usati come nome breve (es. `!ab12cd34` → `CD34`).
+2. **Ogni `send_interval_min`** (es. ogni 10 min) sul **canale principale**:
    - `EnvironmentMetrics` con media temperatura/umidità e pioggia 1h/24h
    - **+30 secondi dopo**: NodeInfo (short/long name) e posizione fissa → il nodo compare con nome e sulla mappa
-3. **Ogni `text_interval_min`** (se > 0): bollettino testo sul canale, es.:
+3. **Ogni `text_interval_min`** (se > 0) sul **canale secondario** (o principale se non configurato):
    ```
    Stazione Meteo Olevano
    🌡️ 22.5°C  💧 65%
    🌧️ 1h 0.0mm  24h 2.3mm
    ```
-4. **Se `lightning_text = true`**: allarme fulmini basato su punteggio soglia:
+4. **Se `lightning_text = true`**: allarme fulmini basato su punteggio soglia, inviato sul canale secondario:
    - Ad ogni pacchetto WH57 (~79 s) si calcola `score = fulmini_negli_ultimi_N_min / distanza_km`
-   - Se `score ≥ lightning_threshold` scatta l'avviso sul canale (cooldown = 1 finestra):
+   - Se `score ≥ lightning_threshold` scatta l'avviso (cooldown = 1 finestra):
    ```
    ⚡ Stazione Meteo Olevano
    8 fulmini rilevati  ~15 km
@@ -181,23 +200,23 @@ bitrate_kbps = 17.5
 
 ```
 EcoWittStation2Meshtastic/
-├── settings.ini                  ← configurazione utente (modifica qui)
+├── settings.ini                  <- configurazione utente (modifica qui)
 ├── platformio.ini
 ├── LICENSE
 ├── tools/
-│   └── apply_settings.py         ← genera user_config.h prima del build
+│   └── apply_settings.py         <- genera user_config.h prima del build
 ├── include/
-│   └── user_config.h             ← generato automaticamente, non editare
+│   └── user_config.h             <- generato automaticamente, non editare
 └── src/
     ├── main.cpp                  loop principale, time-sharing FSK / LoRa
     ├── board_config.h            pin per ogni scheda
     ├── sensors.h / .cpp          decoder WH32, WH40, WH57
     ├── history.h                 ring buffer 24h + finestre pioggia
-    ├── display.h                 primitive grafiche (spazio logico 128×64)
+    ├── display.h                 primitive grafiche (spazio logico 128x64)
     ├── display_oled.cpp          backend SSD1306 (V3 / V4)
-    ├── display_tft.cpp           backend ST7735 160×80 (Wireless Tracker)
+    ├── display_tft.cpp           backend ST7735 160x80 (Wireless Tracker)
     ├── screens.cpp               le 8 schermate
-    └── meshtastic_tx.h / .cpp    protocollo Meshtastic: protobuf + AES128-CTR
+    └── meshtastic_tx.h / .cpp    protocollo Meshtastic: protobuf + AES-128/256-CTR
 ```
 
 ### Riferimenti tecnici
@@ -244,11 +263,12 @@ Custom firmware for **Heltec ESP32 LoRa** boards that receives data from a **Fin
 - **Meshtastic bridge** (optional, fully configurable):
   - `EnvironmentMetrics` telemetry (average temperature, humidity, rainfall 1h/24h) → visible in the app's "Environment" graphs
   - Fixed position (lat/lon/altitude) → node appears on the map
-  - NodeInfo with configurable short/long name (short name also shown on screen 8)
-  - Configurable channel: name and PSK key (base64) set in `settings.ini`
+  - NodeInfo with configurable short/long name — `short_name` can be left empty to automatically use the **last 4 hex digits of the node ID** (same behaviour as Meshtastic)
+  - **Dual channel**: a primary channel for telemetry/NodeInfo/position and an optional secondary channel for text bulletins and lightning alerts (each with its own name and PSK)
+  - Channel keys in base64: supports both **AES-128** (16-byte) and **AES-256** (32-byte) keys
   - Configurable hop limit (0–7)
-  - Lightning alert as a text message on the channel (optional)
-  - Periodic human-readable weather bulletin on the channel (optional, separate interval)
+  - Lightning alert as a text message (optional)
+  - Periodic human-readable weather bulletin (optional, separate interval)
 
 > There is only one radio: FSK reception pauses for ~1–2 seconds during each LoRa transmission, then resumes. With sensors transmitting every 64–79 s the chance of missing a sample is negligible.
 
@@ -274,14 +294,14 @@ Libraries are downloaded automatically on the first build:
 |---|---|
 | `jgromes/RadioLib ^7.1.2` | SX1262 driver (FSK + LoRa) |
 | `olikraus/U8g2 ^2.36.5` | OLED SSD1306 driver |
-| `rweather/Crypto ^0.4.0` | AES128-CTR for Meshtastic encryption |
+| `rweather/Crypto ^0.4.0` | AES-128/256-CTR for Meshtastic encryption |
 | `adafruit/Adafruit ST7735 and ST7789 Library ^1.10.4` | TFT driver |
 | `adafruit/Adafruit GFX Library ^1.11.11` | TFT graphics |
 
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/EcoWittStation2Meshtastic.git
+git clone https://github.com/iz0kew/EcoWittStation2Meshtastic.git
 cd EcoWittStation2Meshtastic
 
 # 1. Customise settings.ini (see Configuration section)
@@ -316,12 +336,23 @@ preset = MediumFast               # LoRa modem preset
                                   # LongFast | LongModerate | LongSlow
 send_interval_min = 10            # telemetry + NodeInfo send interval (minutes)
 text_interval_min = 30            # weather text bulletin on channel (0 = disabled)
-short_name = WX32                 # node short name on the mesh (max 4 chars)
+short_name = WX32                 # node short name (max 4 chars)
+                                  # leave empty to auto-use last 4 hex digits of node ID
 long_name = Weather Station       # node long name on the mesh
 tx_power_dbm = 14                 # TX power in dBm (-9..22 for SX1262)
-hop_limit = 3                     # max hops in mesh (0–7)
-channel_name =                    # channel name (empty = preset name, e.g. "MediumFast")
-channel_key = AQ==                # channel PSK in base64 (AQ== = default public key)
+hop_limit = 3                     # max hops in mesh (0-7)
+ok_to_mqtt = true                 # allow MQTT gateway nodes to forward packets
+
+# Primary channel (telemetry, NodeInfo, position)
+channel_name =                    # empty = preset name (e.g. "MediumFast")
+channel_key = AQ==                # PSK in base64 (AQ== = default public key)
+
+# Secondary channel for text bulletins and lightning alerts (optional)
+# Leave both lines empty to use the primary channel for everything.
+# Key can be AES-128 (16 bytes) or AES-256 (32 bytes).
+text_channel_name =
+text_channel_key =
+
 latitude = 41.8603                # fixed coordinates (0/0 = do not broadcast)
 longitude = 13.0337
 altitude_m = 571                  # altitude in metres above sea level
@@ -331,7 +362,7 @@ lightning_threshold = 0.5         # alert threshold: strikes_in_window / distanc
 
 [ricezione]
 freq_mhz = 868.35                 # sensor RX frequency
-bitrate_kbps = 17.24              # FSK bit rate (WH32: 58 µs → 17.24 kbps)
+bitrate_kbps = 17.24              # FSK bit rate (WH32: 58 µs -> 17.24 kbps)
 freq_dev_khz = 60.0               # transmitter FSK deviation
 rx_bw_khz = 234.3                 # receive bandwidth
 
@@ -339,26 +370,33 @@ rx_bw_khz = 234.3                 # receive bandwidth
 sample_interval_min = 10          # graph sampling interval (5 or 10 minutes)
 ```
 
-**Custom channel:** set `channel_name` and generate a 16-byte key with:
+#### Generating a channel key
+
+**AES-128** (16 bytes, compatible with all Meshtastic clients):
 ```bash
 python -c "import os,base64; print(base64.b64encode(os.urandom(16)).decode())"
+```
+
+**AES-256** (32 bytes, stronger encryption):
+```bash
+python -c "import os,base64; print(base64.b64encode(os.urandom(32)).decode())"
 ```
 
 The script validates all values and halts the build with a clear error message if something is out of range.
 
 ### How it appears on the Meshtastic network
 
-1. **On boot**: node visible as `!xxxxxxxx` (ID derived from the WiFi MAC)
-2. **Every `send_interval_min`** (e.g. every 10 min):
+1. **On boot**: node visible as `!xxxxxxxx` (ID derived from the WiFi MAC). If `short_name` is empty, the last 4 hex digits of the ID are used automatically (e.g. `!ab12cd34` → `CD34`).
+2. **Every `send_interval_min`** (e.g. every 10 min) on the **primary channel**:
    - `EnvironmentMetrics` with average temperature/humidity and rainfall 1h/24h
    - **+30 seconds later**: NodeInfo (short/long name) and fixed position → node appears with name and on the map
-3. **Every `text_interval_min`** (if > 0): text bulletin on the channel, e.g.:
+3. **Every `text_interval_min`** (if > 0) on the **secondary channel** (or primary if not configured):
    ```
    Stazione Meteo Olevano
    🌡️ 22.5°C  💧 65%
    🌧️ 1h 0.0mm  24h 2.3mm
    ```
-4. **If `lightning_text = true`**: score-based lightning alert:
+4. **If `lightning_text = true`**: score-based lightning alert, sent on the secondary channel:
    - Every WH57 packet (~79 s): `score = strikes_in_last_N_min / distance_km`
    - If `score ≥ lightning_threshold`, a channel alert is sent (cooldown = 1 window):
    ```
@@ -387,48 +425,4 @@ bitrate_kbps = 17.5
 ### Project structure
 
 ```
-EcoWittStation2Meshtastic/
-├── settings.ini                  ← user configuration (edit this file)
-├── platformio.ini
-├── LICENSE
-├── tools/
-│   └── apply_settings.py         ← generates user_config.h before each build
-├── include/
-│   └── user_config.h             ← auto-generated, do not edit
-└── src/
-    ├── main.cpp                  main loop, FSK / LoRa time-sharing
-    ├── board_config.h            pin definitions per board
-    ├── sensors.h / .cpp          WH32, WH40, WH57 decoders
-    ├── history.h                 24h ring buffer + rainfall windows
-    ├── display.h                 graphics primitives (128×64 logical space)
-    ├── display_oled.cpp          SSD1306 backend (V3 / V4)
-    ├── display_tft.cpp           ST7735 160×80 backend (Wireless Tracker)
-    ├── screens.cpp               the 8 screens
-    └── meshtastic_tx.h / .cpp    Meshtastic protocol: protobuf + AES128-CTR
-```
-
-### Technical references
-
-Sensor decoders derived from **[rtl_433](https://github.com/merbanan/rtl_433)** sources:
-`fineoffset.c` (WH32, protocol 78), `ambientweather_wh31e.c` (WH40, protocol 113), `fineoffset_wh31l.c` (WH57/WH31L, protocol 190).
-
-Meshtastic protocol implemented by inspecting **[meshtastic/firmware](https://github.com/meshtastic/firmware)** and **[meshtastic/protobufs](https://github.com/meshtastic/protobufs)**:
-default PSK (`Channels.h`), channel hash algorithm (`Channels.cpp`), radio header and hop flags (`RadioInterface.h`), AES-CTR nonce (`CryptoEngine.cpp`), protobuf fields (`mesh.proto`, `telemetry.proto`, `portnums.proto`).
-
-### License
-
-Released under the **MIT License** — see [LICENSE](LICENSE).
-
----
-
-### Changelog
-
-#### v1.1.1
-- Added `ok_to_mqtt` setting: when enabled, sets bit 0 of the `bitfield` field (tag 9) in the `Data` protobuf payload, allowing MQTT gateway nodes to forward packets to the broker.
-
-#### v1.1.0
-- Initial public release.
-
----
-
-<p align="center">Made with ☕ and LoRa waves</p>
+EcoWittSta

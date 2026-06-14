@@ -48,12 +48,14 @@ static const uint8_t s_psk1[MESH_TEXT_CHANNEL_KEY_SIZE] = MESH_TEXT_CHANNEL_KEY;
 // ---------------------------------------------------------------------------
 // Stato interno
 // ---------------------------------------------------------------------------
-static TimeSyncState s_state       = TS_WAITING;
-static uint32_t      s_firstEpoch  = 0;
-static uint8_t       s_confirms    = 0;
-static uint32_t      s_windowEndMs = 0;
-static uint8_t       s_chanHash0   = 0;
-static uint8_t       s_chanHash1   = 0;
+static TimeSyncState s_state        = TS_WAITING;
+static uint32_t      s_firstEpoch   = 0;
+static uint8_t       s_confirms     = 0;
+static uint32_t      s_altEpoch     = 0;   // ancora del cluster alternativo (primo rifiuto)
+static uint8_t       s_altConfirms  = 0;   // pacchetti coerenti con s_altEpoch finora
+static uint32_t      s_windowEndMs  = 0;
+static uint8_t       s_chanHash0    = 0;
+static uint8_t       s_chanHash1    = 0;
 
 // ---------------------------------------------------------------------------
 // Utilità: xor-hash di un buffer (stesso algoritmo di Channels.cpp Meshtastic)
@@ -236,9 +238,11 @@ static void applyEpoch(uint32_t epoch) {
 // ---------------------------------------------------------------------------
 
 void timeSyncBegin() {
-  s_state      = TS_WAITING;
-  s_firstEpoch = 0;
-  s_confirms   = 0;
+  s_state       = TS_WAITING;
+  s_firstEpoch  = 0;
+  s_confirms    = 0;
+  s_altEpoch    = 0;
+  s_altConfirms = 0;
   s_windowEndMs = millis() + TSYNC_WINDOW_MS;
 
   // Calcola channel hash per i due canali (stessa formula di Channels.cpp)
@@ -305,35 +309,76 @@ void timeSyncTick() {
     // timestamp fosse errato (campo protobuf casuale nel range 2020-2050),
     // tutti i campioni successivi verrebbero rifiutati perché il delta
     // verrebbe calcolato rispetto all'orario sbagliato.
-    s_firstEpoch = epoch;
-    s_confirms   = 1;
-    s_state      = TS_UNCONFIRMED;
+    s_firstEpoch  = epoch;
+    s_confirms    = 1;
+    s_altEpoch    = 0;
+    s_altConfirms = 0;
+    s_state       = TS_UNCONFIRMED;
     Serial.printf("[tsync] primo campione: %lu — in attesa di %d conferme\n",
                   (unsigned long)epoch, TSYNC_CONFIRM_MIN - 1);
 
   } else if (s_state == TS_UNCONFIRMED) {
-    // Campione successivo: confronta con il PRIMO campione memorizzato,
-    // non con time(nullptr) (che sarebbe ancora 0 o un valore arbitrario
-    // dato che non abbiamo ancora chiamato applyEpoch).
+    // Campione successivo: confronta con il riferimento principale.
     int32_t deltaS = (int32_t)epoch - (int32_t)s_firstEpoch;
 
-    if (deltaS < -TSYNC_MAX_DELTA_S || deltaS > TSYNC_MAX_DELTA_S) {
-      Serial.printf("[tsync] campione rifiutato: delta %+lds rispetto al primo (> %ds)\n",
-                    (long)deltaS, TSYNC_MAX_DELTA_S);
+    if (deltaS >= -TSYNC_MAX_DELTA_S && deltaS <= TSYNC_MAX_DELTA_S) {
+      // Coerente col riferimento: conta come conferma e azzera il cluster alternativo.
+      s_altEpoch    = 0;
+      s_altConfirms = 0;
+      s_confirms++;
+      Serial.printf("[tsync] conferma %d/%d (delta %+lds)\n",
+                    s_confirms, TSYNC_CONFIRM_MIN, (long)deltaS);
+
+      if (s_confirms >= TSYNC_CONFIRM_MIN) {
+        // Solo ora applichiamo l'orario, usando l'ultimo campione confermato
+        // (più recente e quindi più preciso del primo).
+        applyEpoch(epoch);
+        s_state = TS_CONFIRMED;
+        Serial.printf("[tsync] orario confermato: %lu\n", (unsigned long)epoch);
+        // Il cambio radio LoRa→FSK è delegato a main.cpp (blocco fskStarted).
+      }
       return;
     }
 
-    s_confirms++;
-    Serial.printf("[tsync] conferma %d/%d (delta %+lds)\n",
-                  s_confirms, TSYNC_CONFIRM_MIN, (long)deltaS);
+    // Campione incoerente col riferimento principale: aggiorna il cluster alternativo.
+    if (s_altEpoch == 0) {
+      // Primo rifiuto: inizia un nuovo cluster alternativo.
+      s_altEpoch    = epoch;
+      s_altConfirms = 1;
+      Serial.printf("[tsync] campione rifiutato (delta %+lds): avvio cluster alt %lu [1/%d]\n",
+                    (long)deltaS, (unsigned long)epoch, TSYNC_ALT_MIN);
+    } else {
+      int32_t deltaAlt = (int32_t)epoch - (int32_t)s_altEpoch;
+      if (deltaAlt >= -TSYNC_MAX_DELTA_S && deltaAlt <= TSYNC_MAX_DELTA_S) {
+        // Coerente col cluster alternativo: incrementa il contatore.
+        s_altConfirms++;
+        Serial.printf("[tsync] cluster alt: conferma %d/%d (delta alt %+lds)\n",
+                      s_altConfirms, TSYNC_ALT_MIN, (long)deltaAlt);
 
-    if (s_confirms >= TSYNC_CONFIRM_MIN) {
-      // Solo ora applichiamo l'orario, usando l'ultimo campione confermato
-      // (più recente e quindi più preciso del primo).
-      applyEpoch(epoch);
-      s_state = TS_CONFIRMED;
-      Serial.printf("[tsync] orario confermato: %lu\n", (unsigned long)epoch);
-      // Il cambio radio LoRa→FSK è delegato a main.cpp (blocco fskStarted).
+        if (s_altConfirms >= TSYNC_ALT_MIN) {
+          // Il cluster alternativo ha raggiunto la soglia: il primo campione
+          // era errato. Resetta il riferimento e riparte il conteggio da qui.
+          Serial.printf("[tsync] riferimento errato — reset su cluster alt: ancora=%lu confirms=%d\n",
+                        (unsigned long)s_altEpoch, s_altConfirms);
+          s_firstEpoch  = s_altEpoch;
+          s_confirms    = s_altConfirms;
+          s_altEpoch    = 0;
+          s_altConfirms = 0;
+          Serial.printf("[tsync] conferma %d/%d (dopo reset cluster)\n",
+                        s_confirms, TSYNC_CONFIRM_MIN);
+          if (s_confirms >= TSYNC_CONFIRM_MIN) {
+            applyEpoch(epoch);
+            s_state = TS_CONFIRMED;
+            Serial.printf("[tsync] orario confermato: %lu\n", (unsigned long)epoch);
+          }
+        }
+      } else {
+        // Incoerente anche col cluster alternativo: riparti da questo campione.
+        Serial.printf("[tsync] cluster alt azzerato (delta alt %+lds) — nuovo anchor: %lu\n",
+                      (long)deltaAlt, (unsigned long)epoch);
+        s_altEpoch    = epoch;
+        s_altConfirms = 1;
+      }
     }
   }
 }

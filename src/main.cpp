@@ -267,6 +267,12 @@ static void updateAstroSchedule(const struct tm &lt) {
                 (int)(((g_asch.t[0] - midnight) % 3600) / 60),
                 (int)((g_asch.t[2] - midnight) / 3600),
                 (int)(((g_asch.t[2] - midnight) % 3600) / 60));
+
+  // Pre-marca gli slot già passati come inviati per evitare bollettini
+  // spuri al riavvio quando la sync avviene dopo uno degli orari previsti.
+  time_t nowT = time(nullptr);
+  for (int i = 0; i < 3; i++)
+    if (g_asch.t[i] > 0 && nowT >= g_asch.t[i]) g_asch.sent[i] = true;
 }
 
 static void checkAstroSend() {

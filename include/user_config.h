@@ -5,7 +5,7 @@
 #pragma once
 
 // --- Firmware ---
-#define FW_VERSION             "1.4.0"
+#define FW_VERSION             "1.4.4"
 
 // --- Meshtastic (canale principale: telemetria, NodeInfo, posizione) ---
 #define MESH_ENABLED           1

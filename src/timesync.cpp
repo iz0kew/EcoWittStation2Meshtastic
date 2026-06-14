@@ -12,10 +12,13 @@
 //         varint nel range [2020-01-01, 2050-01-01] — il timestamp unix.
 //      d. Se trovato: aggiorna la state machine.
 //   3. State machine:
-//      TS_WAITING     → (primo timestamp) → settimeofday + TS_UNCONFIRMED
-//      TS_UNCONFIRMED → (conferma ok)     → TS_UNCONFIRMED (confirms++)
+//      TS_WAITING     → (primo timestamp) → memorizza s_firstEpoch → TS_UNCONFIRMED
+//      TS_UNCONFIRMED → (conferma ok, delta vs s_firstEpoch ≤ MAX_DELTA) → confirms++
 //                     → (confirms >= MIN) → settimeofday + TS_CONFIRMED → FSK
 //      TS_WAITING/TS_UNCONFIRMED → (timeout 5 min) → TS_TIMEOUT → FSK
+//      Nota: applyEpoch() viene chiamata SOLO al raggiungimento di TSYNC_CONFIRM_MIN
+//      conferme concordi, evitando il "poison first sample" (primo timestamp
+//      errato che invalida tutti i campioni successivi).
 // ============================================================================
 #include "timesync.h"
 #include "user_config.h"
@@ -30,8 +33,7 @@
 // Radio e ISR definiti in main.cpp
 extern SX1262          radio;
 extern volatile bool   rxFlag;
-void radioStartFSK();
-void radioStartLoRaRX();
+void radioStartLoRaRX();   // chiamata da timeSyncBegin() per avviare la ricezione LoRa
 
 // ---------------------------------------------------------------------------
 // Costanti protocollo (specchio di meshtastic_tx.cpp)
@@ -272,7 +274,8 @@ void timeSyncTick() {
     Serial.printf("[tsync] timeout — stato: %s\n",
                   s_state == TS_UNCONFIRMED ? "non confermato" : "nessun campione");
     s_state = TS_TIMEOUT;
-    radioStartFSK();
+    // Il cambio radio LoRa→FSK è delegato a main.cpp (blocco fskStarted),
+    // che viene eseguito non appena timeSyncDone() ritorna true.
     return;
   }
 
@@ -297,22 +300,25 @@ void timeSyncTick() {
   if (epoch == 0) return;
 
   if (s_state == TS_WAITING) {
-    // Primo campione valido: setta subito l'orologio e attendi conferme
+    // Primo campione valido: memorizza ma NON applica ancora l'orologio.
+    // Applicarlo subito causerebbe il "poison first sample": se questo
+    // timestamp fosse errato (campo protobuf casuale nel range 2020-2050),
+    // tutti i campioni successivi verrebbero rifiutati perché il delta
+    // verrebbe calcolato rispetto all'orario sbagliato.
     s_firstEpoch = epoch;
     s_confirms   = 1;
     s_state      = TS_UNCONFIRMED;
-    applyEpoch(epoch);
     Serial.printf("[tsync] primo campione: %lu — in attesa di %d conferme\n",
                   (unsigned long)epoch, TSYNC_CONFIRM_MIN - 1);
 
   } else if (s_state == TS_UNCONFIRMED) {
-    // Campione successivo: confronta con l'ora di sistema corrente
-    // (che avanza dal primo campione, quindi è già "aggiustata")
-    time_t nowEpoch   = time(nullptr);
-    int32_t deltaS    = (int32_t)epoch - (int32_t)nowEpoch;
+    // Campione successivo: confronta con il PRIMO campione memorizzato,
+    // non con time(nullptr) (che sarebbe ancora 0 o un valore arbitrario
+    // dato che non abbiamo ancora chiamato applyEpoch).
+    int32_t deltaS = (int32_t)epoch - (int32_t)s_firstEpoch;
 
     if (deltaS < -TSYNC_MAX_DELTA_S || deltaS > TSYNC_MAX_DELTA_S) {
-      Serial.printf("[tsync] campione rifiutato: delta %+lds (> %ds)\n",
+      Serial.printf("[tsync] campione rifiutato: delta %+lds rispetto al primo (> %ds)\n",
                     (long)deltaS, TSYNC_MAX_DELTA_S);
       return;
     }
@@ -322,11 +328,12 @@ void timeSyncTick() {
                   s_confirms, TSYNC_CONFIRM_MIN, (long)deltaS);
 
     if (s_confirms >= TSYNC_CONFIRM_MIN) {
-      // Affina l'ora con l'ultimo campione confermato
+      // Solo ora applichiamo l'orario, usando l'ultimo campione confermato
+      // (più recente e quindi più preciso del primo).
       applyEpoch(epoch);
       s_state = TS_CONFIRMED;
       Serial.printf("[tsync] orario confermato: %lu\n", (unsigned long)epoch);
-      radioStartFSK();
+      // Il cambio radio LoRa→FSK è delegato a main.cpp (blocco fskStarted).
     }
   }
 }

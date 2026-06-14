@@ -4,9 +4,16 @@
 // All'avvio la scheda resta in ascolto LoRa per TSYNC_WINDOW_MS (5 min).
 // Ogni pacchetto Meshtastic ricevuto sul canale configurato viene decifrato
 // e scansionato alla ricerca di un timestamp unix (campo time nelle Telemetry
-// e nelle Position). Dopo aver ricevuto il primo timestamp valido, attendiamo
-// almeno TSYNC_CONFIRM_MIN ulteriori conferme entro ±TSYNC_MAX_DELTA_S secondi
-// prima di considerare l'orologio affidabile.
+// e nelle Position).
+//
+// Algoritmo di conferma (immune al "poison first sample"):
+//   - Il primo timestamp valido viene memorizzato come riferimento ma NON
+//     applicato all'orologio di sistema.
+//   - I campioni successivi vengono confrontati con il primo: se il delta
+//     è entro ±TSYNC_MAX_DELTA_S secondi vengono contati come conferme.
+//   - Solo dopo TSYNC_CONFIRM_MIN conferme concordi l'orologio viene settato
+//     (con l'ultimo campione, più recente e quindi più preciso).
+//   - Se la finestra scade prima: TS_TIMEOUT, l'orologio rimane non settato.
 // ============================================================================
 #pragma once
 #include <Arduino.h>

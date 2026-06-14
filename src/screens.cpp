@@ -254,23 +254,32 @@ static void drawTime() {
 
   char l[44];
 
-  if (ts.state == TS_CONFIRMED || ts.state == TS_UNCONFIRMED) {
+  if (ts.state == TS_CONFIRMED) {
+    // applyEpoch() è già stato chiamato: time(nullptr) è affidabile.
     time_t now = time(nullptr);
     struct tm lt = *localtime(&now);
 
     snprintf(l, sizeof(l), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
     gfxTextBig(4, 40, l);
 
-    if (ts.state == TS_CONFIRMED) {
-      static const char *GG[] = {"Dom","Lun","Mar","Mer","Gio","Ven","Sab"};
-      static const char *MM[] = {"Gen","Feb","Mar","Apr","Mag","Giu",
-                                  "Lug","Ago","Set","Ott","Nov","Dic"};
-      snprintf(l, sizeof(l), "%s %d %s %d",
-               GG[lt.tm_wday], lt.tm_mday, MM[lt.tm_mon], lt.tm_year + 1900);
-    } else {
-      snprintf(l, sizeof(l), "conf %d/%d  -%ds",
-               ts.confirms, TSYNC_CONFIRM_MIN, ts.secsLeft);
-    }
+    static const char *GG[] = {"Dom","Lun","Mar","Mer","Gio","Ven","Sab"};
+    static const char *MM[] = {"Gen","Feb","Mar","Apr","Mag","Giu",
+                                "Lug","Ago","Set","Ott","Nov","Dic"};
+    snprintf(l, sizeof(l), "%s %d %s %d",
+             GG[lt.tm_wday], lt.tm_mday, MM[lt.tm_mon], lt.tm_year + 1900);
+    gfxText(0, 56, l);
+
+  } else if (ts.state == TS_UNCONFIRMED) {
+    // applyEpoch() non ancora chiamato: mostriamo il primo campione grezzo
+    // con "~" per indicare che è provvisorio. Usiamo gmtime perché il fuso
+    // potrebbe non essere ancora applicato in modo affidabile.
+    time_t t = (time_t)ts.firstEpoch;
+    struct tm lt = *gmtime(&t);
+    snprintf(l, sizeof(l), "~%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
+    gfxTextBig(4, 40, l);
+
+    snprintf(l, sizeof(l), "conf %d/%d  -%ds",
+             ts.confirms, TSYNC_CONFIRM_MIN, ts.secsLeft);
     gfxText(0, 56, l);
 
   } else if (ts.state == TS_WAITING) {

@@ -1,4 +1,5 @@
 #include "meshtastic_tx.h"
+#include "timesync.h"
 #include "user_config.h"
 #include <RadioLib.h>
 #include <Crypto.h>
@@ -231,9 +232,11 @@ bool meshSendTelemetry(bool haveTH, float tempC, float rh,
   }
 
   // Telemetry { fixed32 time=1; environment_metrics=3 }
+  // time=0 viene omesso dal protobuf (valore default) — usato quando
+  // l'orologio non è ancora sincronizzato, evitando di trasmettere 1970-01-01.
   uint8_t tel[80];
   size_t t = 0;
-  t = pbFixed32Field(tel, t, 1, (uint32_t)time(nullptr));
+  t = pbFixed32Field(tel, t, 1, timeSyncValid() ? (uint32_t)time(nullptr) : 0);
   t = pbBytesField(tel, t, 3, env, e);
 
   return sendData(PORT_TELEMETRY, tel, t, 0);   // sempre canale principale
@@ -241,7 +244,9 @@ bool meshSendTelemetry(bool haveTH, float tempC, float rh,
 
 // ---------------------------------------------------------------------------
 bool meshSendNodeInfo() {
-  // User { id=1 string; long_name=2 string; short_name=3 string; hw_model=6 varint }
+  // User { id=1 string; long_name=2 string; short_name=3 string;
+  //        hw_model=6 varint; is_unmessagable=9 bool }
+  // Riferimento: meshtastic_User_is_unmessagable_tag = 9 (mesh.pb.h)
   char nodeIdStr[12];
   snprintf(nodeIdStr, sizeof(nodeIdStr), "!%08lx", (unsigned long)s_nodeId);
 
@@ -251,6 +256,7 @@ bool meshSendNodeInfo() {
   u = pbBytesField(user, u, 2, (const uint8_t *)MESH_LONG_NAME, strlen(MESH_LONG_NAME));
   u = pbBytesField(user, u, 3, (const uint8_t *)s_shortName, strlen(s_shortName));
   u = pbVarintField(user, u, 6, 43);   // HW_MODEL_HELTEC_V3 = 43
+  u = pbVarintField(user, u, 9, 1);    // is_unmessagable = true: nodo TX-only, non risponde ai DM
 
   return sendData(PORT_NODEINFO, user, u, 0);
 }
@@ -269,7 +275,8 @@ bool meshSendPosition() {
   p = pbFixed32Field(pos, p, 1, (uint32_t)latI);
   p = pbFixed32Field(pos, p, 2, (uint32_t)lonI);
   p = pbVarintField(pos, p, 3, (uint64_t)(uint32_t)MESH_ALT_M);
-  p = pbFixed32Field(pos, p, 9, (uint32_t)time(nullptr));
+  // time=0 omesso dal protobuf — evita timestamp falsi se orologio non sincronizzato.
+  p = pbFixed32Field(pos, p, 9, timeSyncValid() ? (uint32_t)time(nullptr) : 0);
 
   return sendData(PORT_POSITION, pos, p, 0);
 }

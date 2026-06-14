@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.4.4] — 2026-06-14
+
+### Corretto
+- **timesync: "poison first sample"** (`src/timesync.cpp`): il primo timestamp
+  ricevuto non veniva più applicato immediatamente all'orologio di sistema.
+  Veniva memorizzato come riferimento (`s_firstEpoch`) e applicato solo dopo
+  aver raccolto `TSYNC_CONFIRM_MIN` conferme concordi. Questo evita che un
+  campo protobuf casuale nel range 2020–2050 invalidi tutti i campioni
+  successivi bloccando la sincronizzazione in `TS_UNCONFIRMED` per tutta la
+  finestra di 5 minuti.
+- **timesync: confronto conferme su `s_firstEpoch`** (`src/timesync.cpp`): i
+  campioni successivi al primo vengono ora confrontati con `s_firstEpoch`
+  invece che con `time(nullptr)` (che era 0 finché `applyEpoch()` non veniva
+  chiamata).
+- **timesync: doppia chiamata a `radioStartFSK()`** (`src/timesync.cpp`):
+  rimossa la chiamata a `radioStartFSK()` da `timeSyncTick()` (sia in caso di
+  conferma che di timeout). Il cambio di modalità radio LoRa→FSK è ora
+  responsabilità esclusiva di `main.cpp` tramite il blocco `fskStarted`,
+  evitando una doppia inizializzazione della radio.
+- **meshtastic_tx: timestamp falso in assenza di orologio** (`src/meshtastic_tx.cpp`):
+  `Telemetry.time` e `Position.time` ora vengono impostati a `0` (campo omesso
+  in protobuf) quando `timeSyncValid()` è falso, evitando di trasmettere date
+  tipo `1970-01-01 00:05:xx` sui nodi della rete.
+- **screens: ora spazzatura in `TS_UNCONFIRMED`** (`src/screens.cpp`): la
+  schermata orario non chiama più `time(nullptr)` in stato `TS_UNCONFIRMED`
+  (orologio non ancora settato). Mostra invece il primo campione grezzo
+  (`ts.firstEpoch`) in UTC con prefisso `~` per indicare che è provvisorio.
+
+### Aggiunto
+- **NodeInfo `is_unmessagable`** (`src/meshtastic_tx.cpp`): il pacchetto
+  NodeInfo include ora il campo `is_unmessagable = true` (field 9, protobuf
+  Meshtastic). I nodi della rete che ricevono il NodeInfo sapranno che questa
+  stazione è TX-only e non può ricevere messaggi diretti.
+
+---
+
 ## [1.4.0] — 2025-06-13
 
 ### Aggiunto

@@ -121,8 +121,8 @@ preset = MediumFast               # preset modem LoRa
                                   # MediumFast | MediumSlow |
                                   # LongFast | LongModerate | LongSlow
 send_interval_min = 10            # intervallo tra invii telemetria + NodeInfo (minuti)
-text_interval_min = 0            # bollettino meteo testo (0 = disabilitato)
-short_name =                  # nome breve (max 4 caratteri)
+text_interval_min = 0             # bollettino meteo testo (0 = disabilitato)
+short_name =                      # nome breve (max 4 caratteri)
                                   # lascia vuoto per usare gli ultimi 4 hex del node ID
 long_name = Stazione Meteo        # nome esteso sulla rete
 tx_power_dbm = 22                 # potenza TX in dBm (-9..22 per SX1262)
@@ -178,7 +178,7 @@ Lo script valida tutti i valori e blocca la compilazione con un messaggio chiaro
    - **+30 secondi dopo**: NodeInfo (short/long name) e posizione fissa → il nodo compare con nome e sulla mappa
 3. **Ogni `text_interval_min`** (se > 0) sul **canale secondario** (o principale se non configurato):
    ```
-   Stazione Meteo Olevano
+   Stazione Meteo
    🌡️ 22.5°C  💧 65%
    🌧️ 1h 0.0mm  24h 2.3mm
    🌅 05:42  🌇 20:44
@@ -189,7 +189,7 @@ Lo script valida tutti i valori e blocca la compilazione con un messaggio chiaro
    - Ad ogni pacchetto WH57 (~79 s) si calcola `score = fulmini_negli_ultimi_N_min / distanza_km`
    - Se `score ≥ lightning_threshold` scatta l'avviso (cooldown = 1 finestra):
    ```
-   ⚡ Stazione Meteo Olevano
+   ⚡ Stazione Meteo
    8 fulmini rilevati  ~15 km
    ```
    - Esempi equivalenti con soglia 0.5: 10 fulmini@20 km, 5@10 km, 20@40 km
@@ -421,7 +421,7 @@ The script validates all values and halts the build with a clear error message i
    - **+30 seconds later**: NodeInfo (short/long name) and fixed position → node appears with name and on the map
 3. **Every `text_interval_min`** (if > 0) on the **secondary channel** (or primary if not configured):
    ```
-   Stazione Meteo Olevano
+   Stazione Meteo
    🌡️ 22.5°C  💧 65%
    🌧️ 1h 0.0mm  24h 2.3mm
    🌅 05:42  🌇 20:44
@@ -432,7 +432,7 @@ The script validates all values and halts the build with a clear error message i
    - Every WH57 packet (~79 s): `score = strikes_in_last_N_min / distance_km`
    - If `score ≥ lightning_threshold`, a channel alert is sent (cooldown = 1 window):
    ```
-   ⚡ Stazione Meteo Olevano
+   ⚡ Stazione Meteo
    8 fulmini rilevati  ~15 km
    ```
    - Equivalent examples at threshold 0.5: 10 strikes@20 km, 5@10 km, 20@40 km

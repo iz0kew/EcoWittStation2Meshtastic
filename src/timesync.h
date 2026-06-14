@@ -9,10 +9,16 @@
 // Algoritmo di conferma (immune al "poison first sample"):
 //   - Il primo timestamp valido viene memorizzato come riferimento ma NON
 //     applicato all'orologio di sistema.
-//   - I campioni successivi vengono confrontati con il primo: se il delta
+//   - I campioni successivi vengono confrontati col riferimento: se il delta
 //     è entro ±TSYNC_MAX_DELTA_S secondi vengono contati come conferme.
 //   - Solo dopo TSYNC_CONFIRM_MIN conferme concordi l'orologio viene settato
 //     (con l'ultimo campione, più recente e quindi più preciso).
+//   - Se un campione è troppo distante dal riferimento, viene accumulato in un
+//     cluster alternativo. Quando TSYNC_ALT_MIN pacchetti consecutivi formano
+//     un cluster coerente, il riferimento viene resettato su quel cluster
+//     (il primo campione era errato) e il conteggio riparte da lì.
+//   - Se un nuovo campione non è coerente nemmeno col cluster alternativo,
+//     il cluster viene azzerato e ricomincia da quel pacchetto.
 //   - Se la finestra scade prima: TS_TIMEOUT, l'orologio rimane non settato.
 // ============================================================================
 #pragma once
@@ -22,6 +28,7 @@
 #define TSYNC_WINDOW_MS    (5UL * 60UL * 1000UL)   // finestra ascolto all'avvio: 5 min
 #define TSYNC_CONFIRM_MIN  3                          // conferme minime per accettare l'orario
 #define TSYNC_MAX_DELTA_S  120                        // scarto max accettabile tra campioni (s)
+#define TSYNC_ALT_MIN      2                          // pacchetti coerenti nel cluster alternativo prima di resettare il riferimento
 
 enum TimeSyncState {
   TS_WAITING,       // finestra attiva, nessun timestamp ancora

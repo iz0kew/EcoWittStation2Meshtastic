@@ -22,7 +22,8 @@ SX1262 radio = new Module(PIN_LORA_NSS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BU
 
 History  history;
 uint32_t g_fskOk = 0, g_fskBad = 0;
-uint32_t g_nextMeshMs = 0;
+uint32_t g_nextMeshMs    = 0;
+uint32_t g_nextNodeInfoMs = 0;
 
 static const uint8_t RX_PKT_LEN = 24;   // copre il frame piu' lungo + margine
 volatile bool rxFlag = false;            // visibile a timesync.cpp
@@ -316,7 +317,8 @@ void setup() {
   meshInit();
   // Il primo TX e' posticipato di tutta la finestra di sync + 30 s di margine,
   // cosi' la radio e' libera di ricevere durante la sincronizzazione.
-  g_nextMeshMs = millis() + TSYNC_WINDOW_MS + 30000UL;
+  g_nextMeshMs     = millis() + TSYNC_WINDOW_MS + 30000UL;
+  g_nextNodeInfoMs = g_nextMeshMs + 30000UL;
 #endif
 
   // Avvia la sincronizzazione orario: porta la radio in LoRa RX per 5 min.
@@ -427,10 +429,8 @@ void loop() {
 #endif
 
   // --- NodeInfo + posizione: stesso ciclo di send_interval_min, sfasato di 30s ---
-  static uint32_t nextNodeInfo = 0;
-  if (nextNodeInfo == 0) nextNodeInfo = g_nextMeshMs + 30000UL;
-  if ((int32_t)(now - nextNodeInfo) >= 0) {
-    nextNodeInfo += (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
+  if ((int32_t)(now - g_nextNodeInfoMs) >= 0) {
+    g_nextNodeInfoMs += (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
     meshSendNodeInfo();
 #if MESH_POS_ENABLED
     delay(1000);

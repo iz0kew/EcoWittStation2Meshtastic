@@ -12,7 +12,7 @@
 
 // stato condiviso esposto da main.cpp
 extern uint32_t g_fskOk, g_fskBad;
-extern uint32_t g_nextMeshMs;     // millis() del prossimo invio mesh (0 = mai)
+extern uint32_t g_nextTelemetryMs; // millis() del prossimo invio telemetria
 
 static int curScreen = SCR_OVERVIEW;
 
@@ -64,8 +64,8 @@ static void drawOverview() {
   gfxText(0, 51, l);
 
 #if MESH_ENABLED
-  if (g_nextMeshMs) {
-    int32_t left = (int32_t)(g_nextMeshMs - millis()) / 1000;
+  if (g_nextTelemetryMs) {
+    int32_t left = (int32_t)(g_nextTelemetryMs - millis()) / 1000;
     if (left < 0) left = 0;
     snprintf(l, sizeof(l), "mesh TX in %ld:%02ld", (long)(left / 60), (long)(left % 60));
     gfxText(0, 63, l);
@@ -208,7 +208,7 @@ static void drawMesh() {
   snprintf(l, sizeof(l), "SF%d BW%d %ddBm hop%d", MESH_SF, (int)MESH_BW_KHZ,
            MESH_TX_POWER_DBM, MESH_HOP_LIMIT);
   gfxText(0, 48, l);
-  int32_t left = g_nextMeshMs ? (int32_t)(g_nextMeshMs - millis()) / 1000 : -1;
+  int32_t left = g_nextTelemetryMs ? (int32_t)(g_nextTelemetryMs - millis()) / 1000 : -1;
   if (left < 0) left = 0;
   snprintf(l, sizeof(l), "inviati %lu  next %ld:%02ld",
            (unsigned long)meshPacketsSent(), (long)(left / 60), (long)(left % 60));

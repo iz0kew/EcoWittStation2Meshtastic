@@ -245,8 +245,11 @@ bool meshSendTelemetry(bool haveTH, float tempC, float rh,
 // ---------------------------------------------------------------------------
 bool meshSendNodeInfo() {
   // User { id=1 string; long_name=2 string; short_name=3 string;
-  //        hw_model=6 varint; is_unmessagable=9 bool }
-  // Riferimento: meshtastic_User_is_unmessagable_tag = 9 (mesh.pb.h)
+  //        hw_model=5 varint; is_unmessagable=9 bool }
+  // NB: hw_model è il field 5 (non 6: il 6 è is_licensed). Inviarlo come 6
+  //     impostava per errore is_licensed e lasciava hw_model non valorizzato.
+  // Riferimenti (mesh.pb.h): meshtastic_User_hw_model_tag = 5,
+  //     meshtastic_User_is_licensed_tag = 6, meshtastic_User_is_unmessagable_tag = 9
   char nodeIdStr[12];
   snprintf(nodeIdStr, sizeof(nodeIdStr), "!%08lx", (unsigned long)s_nodeId);
 
@@ -255,7 +258,7 @@ bool meshSendNodeInfo() {
   u = pbBytesField(user, u, 1, (const uint8_t *)nodeIdStr,   strlen(nodeIdStr));
   u = pbBytesField(user, u, 2, (const uint8_t *)MESH_LONG_NAME, strlen(MESH_LONG_NAME));
   u = pbBytesField(user, u, 3, (const uint8_t *)s_shortName, strlen(s_shortName));
-  u = pbVarintField(user, u, 6, 43);   // HW_MODEL_HELTEC_V3 = 43
+  u = pbVarintField(user, u, 5, 43);   // hw_model: HW_MODEL_HELTEC_V3 = 43
   u = pbVarintField(user, u, 9, 1);    // is_unmessagable = true: nodo TX-only, non risponde ai DM
 
   return sendData(PORT_NODEINFO, user, u, 0);
@@ -267,7 +270,10 @@ bool meshSendPosition() {
   return false;
 #endif
   // Position { sfixed32 latitude_i=1; sfixed32 longitude_i=2; int32 altitude=3;
-  //            fixed32 time=9 }
+  //            fixed32 time=4 }
+  // NB: in mesh.proto il campo time della Position è il field 4 (non 9: il 9 è
+  // altitude_hae, sint32). Usarlo come 9/fixed32 genera un mismatch di wire type
+  // che fa scartare l'INTERO pacchetto Position al ricevitore.
   // sfixed32 usa wire type 5 (fixed 32 bit), stesso encoding di uint32_t
   uint8_t pos[40];
   size_t p = 0;
@@ -275,8 +281,13 @@ bool meshSendPosition() {
   p = pbFixed32Field(pos, p, 1, (uint32_t)latI);
   p = pbFixed32Field(pos, p, 2, (uint32_t)lonI);
   p = pbVarintField(pos, p, 3, (uint64_t)(uint32_t)MESH_ALT_M);
-  // time=0 omesso dal protobuf — evita timestamp falsi se orologio non sincronizzato.
-  p = pbFixed32Field(pos, p, 9, timeSyncValid() ? (uint32_t)time(nullptr) : 0);
+  // time: omesso (non scritto) se l'orologio non e' ancora sincronizzato,
+  // per non trasmettere un timestamp 1970-01-01 che i ricevitori potrebbero filtrare.
+  if (timeSyncValid())
+    p = pbFixed32Field(pos, p, 4, (uint32_t)time(nullptr));
+  // precision_bits=32: precisione piena (in Meshtastic 2.x e' richiesto > 0
+  // affinche' la posizione venga mostrata sulla mappa dell'app).
+  p = pbVarintField(pos, p, 21, 32);
 
   return sendData(PORT_POSITION, pos, p, 0);
 }

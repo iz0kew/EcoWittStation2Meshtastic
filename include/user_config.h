@@ -5,7 +5,7 @@
 #pragma once
 
 // --- Firmware ---
-#define FW_VERSION             "1.4.4"
+#define FW_VERSION             "1.4.5"
 
 // --- Meshtastic (canale principale: telemetria, NodeInfo, posizione) ---
 #define MESH_ENABLED           1
@@ -18,9 +18,9 @@
 #define MESH_CHANNEL_KEY_SIZE  16
 #define MESH_SEND_INTERVAL_MIN 10
 #define MESH_TEXT_INTERVAL_MIN 120
-#define MESH_SHORT_NAME        "OLE1"
+#define MESH_SHORT_NAME        "WX00"
 #define MESH_SHORT_NAME_AUTO   0
-#define MESH_LONG_NAME         "Stazione Meteo Olevano"
+#define MESH_LONG_NAME         "Stazione Meteo"
 #define MESH_TX_POWER_DBM      22
 #define MESH_HOP_LIMIT         3
 #define MESH_OK_TO_MQTT        1

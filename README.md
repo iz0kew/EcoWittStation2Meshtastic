@@ -1,4 +1,4 @@
-# EcoWittStation2Meshtastic — v1.4.4
+# EcoWittStation2Meshtastic — v1.4.5
 
 <p align="center">
   <strong>🇮🇹 <a href="#italiano">Italiano</a></strong> &nbsp;|&nbsp;

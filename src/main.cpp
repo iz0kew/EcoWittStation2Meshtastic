@@ -22,8 +22,9 @@ SX1262 radio = new Module(PIN_LORA_NSS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BU
 
 History  history;
 uint32_t g_fskOk = 0, g_fskBad = 0;
-uint32_t g_nextMeshMs    = 0;
-uint32_t g_nextNodeInfoMs = 0;
+uint32_t g_nextNodeInfoMs  = 0;
+uint32_t g_nextTelemetryMs = 0;
+uint32_t g_nextPositionMs  = 0;
 
 static const uint8_t RX_PKT_LEN = 24;   // copre il frame piu' lungo + margine
 volatile bool rxFlag = false;            // visibile a timesync.cpp
@@ -315,10 +316,12 @@ void setup() {
 
 #if MESH_ENABLED
   meshInit();
-  // Il primo TX e' posticipato di tutta la finestra di sync + 30 s di margine,
-  // cosi' la radio e' libera di ricevere durante la sincronizzazione.
-  g_nextMeshMs     = millis() + TSYNC_WINDOW_MS + 30000UL;
-  g_nextNodeInfoMs = g_nextMeshMs + 30000UL;
+  // I tre tipi di pacchetto sono sfasati di 30 s l'uno dall'altro per evitare
+  // trasmissioni ravvicinate; il primo TX parte dopo la finestra di sync + 30 s.
+  uint32_t firstTx    = millis() + TSYNC_WINDOW_MS + 30000UL;
+  g_nextNodeInfoMs    = firstTx;
+  g_nextTelemetryMs   = firstTx + 30000UL;
+  g_nextPositionMs    = firstTx + 60000UL;
 #endif
 
   // Avvia la sincronizzazione orario: porta la radio in LoRa RX per 5 min.
@@ -410,11 +413,25 @@ void loop() {
   }
 
 #if MESH_ENABLED
-  // --- telemetria periodica ---
-  if (g_nextMeshMs && (int32_t)(now - g_nextMeshMs) >= 0) {
-    g_nextMeshMs = now + (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
+  // --- NodeInfo ---
+  if (g_nextNodeInfoMs && (int32_t)(now - g_nextNodeInfoMs) >= 0) {
+    g_nextNodeInfoMs += (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
+    meshSendNodeInfo();
+  }
+
+  // --- telemetria periodica (sfasata di 30 s rispetto a NodeInfo) ---
+  if (g_nextTelemetryMs && (int32_t)(now - g_nextTelemetryMs) >= 0) {
+    g_nextTelemetryMs += (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
     meshPeriodicSend();
   }
+
+  // --- posizione fissa (sfasata di 60 s rispetto a NodeInfo) ---
+#if MESH_POS_ENABLED
+  if (g_nextPositionMs && (int32_t)(now - g_nextPositionMs) >= 0) {
+    g_nextPositionMs += (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
+    meshSendPosition();
+  }
+#endif
 
   // --- bollettino meteo ad orari astronomici su ch0 (MediumFast) ---
   checkAstroSend();
@@ -427,16 +444,6 @@ void loop() {
     meshSendWeatherText(1);   // canale testo / METEOLAZIO
   }
 #endif
-
-  // --- NodeInfo + posizione: stesso ciclo di send_interval_min, sfasato di 30s ---
-  if ((int32_t)(now - g_nextNodeInfoMs) >= 0) {
-    g_nextNodeInfoMs += (uint32_t)MESH_SEND_INTERVAL_MIN * 60000UL;
-    meshSendNodeInfo();
-#if MESH_POS_ENABLED
-    delay(1000);
-    meshSendPosition();
-#endif
-  }
 #endif
 
   // --- refresh display ---
